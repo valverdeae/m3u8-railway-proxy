@@ -1,8 +1,7 @@
 {
   "$schema": "https://railway.app/railway.schema.json",
   "build": {
-    "builder": "NIXPACKS",
-    "buildCommand": "npm install --omit=dev"
+    "builder": "NIXPACKS"
   },
   "deploy": {
     "numReplicas": 1,
@@ -10,9 +9,8 @@
   },
   "crons": [
     {
-      "command": "cd /app && node update.js",
-      "schedule": "*/1 * * * *",
-      "timeout": 45
+      "command": "node update.js",
+      "schedule": "*/1 * * * *"
     }
   ]
 }
