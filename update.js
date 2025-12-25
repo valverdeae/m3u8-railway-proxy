@@ -4,32 +4,24 @@ const path = require('path');
 
 const SOURCE_URL = 'https://livecricketsl.cc.nf/proxy/fox.php';
 
-// IMPORTANT: Railway cron runs in project root
-const PROJECT_ROOT = process.cwd();
-const TXT_PATH = path.join(PROJECT_ROOT, 'alternate.txt');
-const M3U8_PATH = path.join(PROJECT_ROOT, 'alternate.m3u8');
-
-// Log everything for debugging
-console.log('==========================================');
-console.log('RAILWAY CRON JOB STARTING');
-console.log(`Time: ${new Date().toISOString()}`);
-console.log(`CWD: ${PROJECT_ROOT}`);
-console.log(`Files will be saved to:`);
-console.log(`  TXT: ${TXT_PATH}`);
-console.log(`  M3U8: ${M3U8_PATH}`);
-console.log('==========================================');
+// IMPORTANT: Use __dirname for consistent paths
+const TXT_PATH = path.join(__dirname, 'alternate.txt');
+const M3U8_PATH = path.join(__dirname, 'alternate.m3u8');
 
 async function updateStream() {
+  const timestamp = new Date().toISOString();
+  console.log(`\n========== [${timestamp}] CRON JOB STARTING ==========`);
+  
   try {
     console.log('📡 Fetching stream from source...');
     
     const response = await fetch(SOURCE_URL, {
       headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        'User-Agent': 'Mozilla/5.0',
         'Referer': 'https://livecricketsl.cc.nf/',
         'Accept': 'application/x-mpegURL'
       },
-      timeout: 20000
+      timeout: 15000
     });
 
     if (!response.ok) {
@@ -40,13 +32,11 @@ async function updateStream() {
     console.log(`✅ Fetched ${text.length} characters`);
     
     if (!text.includes('#EXTM3U')) {
-      throw new Error('Invalid M3U8 - missing #EXTM3U tag');
+      throw new Error('Invalid M3U8 content');
     }
 
-    const timestamp = new Date().toISOString();
-    
     // Create content
-    const txtContent = `# Updated via Railway: ${timestamp}\n${text}`;
+    const txtContent = `# Updated: ${timestamp}\n${text}`;
     const m3u8Content = `#EXTM3U\n# Updated: ${timestamp}\n${text}`;
     
     // Write files
@@ -55,43 +45,35 @@ async function updateStream() {
     fs.writeFileSync(M3U8_PATH, m3u8Content, 'utf8');
     
     // Verify
-    const txtExists = fs.existsSync(TXT_PATH);
-    const m3u8Exists = fs.existsSync(M3U8_PATH);
+    const txtSize = fs.statSync(TXT_PATH).size;
+    const m3u8Size = fs.statSync(M3U8_PATH).size;
     
-    if (txtExists && m3u8Exists) {
-      const txtSize = fs.statSync(TXT_PATH).size;
-      const m3u8Size = fs.statSync(M3U8_PATH).size;
-      
-      console.log('🎉 UPDATE SUCCESSFUL!');
-      console.log(`   Files saved: ${txtSize} bytes (txt), ${m3u8Size} bytes (m3u8)`);
-      console.log(`   Access at: /alternate.txt`);
-      console.log(`   Next update in 1 minute`);
-      return true;
-    } else {
-      throw new Error('Files not created successfully');
-    }
+    console.log(`🎉 UPDATE SUCCESSFUL!`);
+    console.log(`   Files: ${txtSize} bytes (txt), ${m3u8Size} bytes (m3u8)`);
+    console.log(`   Paths: ${TXT_PATH}, ${M3U8_PATH}`);
+    console.log(`============================================\n`);
+    
+    return true;
     
   } catch (error) {
     console.error('❌ UPDATE FAILED:', error.message);
     
-    // Create placeholder files if they don't exist
-    if (!fs.existsSync(TXT_PATH)) {
-      fs.writeFileSync(TXT_PATH, '#EXTM3U\n# Error: Update failed\n');
-    }
-    if (!fs.existsSync(M3U8_PATH)) {
-      fs.writeFileSync(M3U8_PATH, '#EXTM3U\n# Error: Update failed\n');
-    }
+    // Create error placeholder files
+    const errorContent = `#EXTM3U\n# Update failed at ${timestamp}\n# Error: ${error.message}`;
+    fs.writeFileSync(TXT_PATH, errorContent, 'utf8');
+    fs.writeFileSync(M3U8_PATH, errorContent, 'utf8');
     
+    console.log(`============================================\n`);
     return false;
   }
 }
 
-// Run immediately
-updateStream().then(success => {
-  const exitCode = success ? 0 : 1;
-  console.log(`Exiting with code: ${exitCode}`);
-  process.exit(exitCode);
-}).catch(error => {
-  console.error('Unhandled error:', error);
-  process.exit(1);
-});
+// Export for manual triggering
+module.exports = updateStream;
+
+// Run if called directly (by cron)
+if (require.main === module) {
+  updateStream().then(success => {
+    process.exit(success ? 0 : 1);
+  });
+}
