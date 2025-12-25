@@ -4,27 +4,32 @@ const path = require('path');
 
 const SOURCE_URL = 'https://livecricketsl.cc.nf/proxy/fox.php';
 
-// IMPORTANT: Use absolute paths for Railway cron
-const TXT_PATH = path.join(process.cwd(), 'alternate.txt');
-const M3U8_PATH = path.join(process.cwd(), 'alternate.m3u8');
+// IMPORTANT: Railway cron runs in project root
+const PROJECT_ROOT = process.cwd();
+const TXT_PATH = path.join(PROJECT_ROOT, 'alternate.txt');
+const M3U8_PATH = path.join(PROJECT_ROOT, 'alternate.m3u8');
+
+// Log everything for debugging
+console.log('==========================================');
+console.log('RAILWAY CRON JOB STARTING');
+console.log(`Time: ${new Date().toISOString()}`);
+console.log(`CWD: ${PROJECT_ROOT}`);
+console.log(`Files will be saved to:`);
+console.log(`  TXT: ${TXT_PATH}`);
+console.log(`  M3U8: ${M3U8_PATH}`);
+console.log('==========================================');
 
 async function updateStream() {
-  const timestamp = new Date().toISOString();
-  console.log(`[${timestamp}] Starting update from cron job...`);
-  console.log(`Current directory: ${process.cwd()}`);
-  console.log(`TXT path: ${TXT_PATH}`);
-  console.log(`M3U8 path: ${M3U8_PATH}`);
-  
   try {
-    // Fetch from source
-    console.log('Fetching stream...');
+    console.log('📡 Fetching stream from source...');
+    
     const response = await fetch(SOURCE_URL, {
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
         'Referer': 'https://livecricketsl.cc.nf/',
         'Accept': 'application/x-mpegURL'
       },
-      timeout: 15000
+      timeout: 20000
     });
 
     if (!response.ok) {
@@ -32,49 +37,61 @@ async function updateStream() {
     }
 
     const text = await response.text();
-    console.log(`Fetched ${text.length} characters`);
+    console.log(`✅ Fetched ${text.length} characters`);
     
     if (!text.includes('#EXTM3U')) {
-      throw new Error('Invalid M3U8 content - no #EXTM3U tag found');
+      throw new Error('Invalid M3U8 - missing #EXTM3U tag');
     }
 
-    // Create both files
-    const txtContent = `# Updated via Railway Cron: ${timestamp}\n${text}`;
+    const timestamp = new Date().toISOString();
+    
+    // Create content
+    const txtContent = `# Updated via Railway: ${timestamp}\n${text}`;
     const m3u8Content = `#EXTM3U\n# Updated: ${timestamp}\n${text}`;
     
-    // Save files with absolute paths
-    console.log('Writing files...');
+    // Write files
+    console.log('💾 Writing files...');
     fs.writeFileSync(TXT_PATH, txtContent, 'utf8');
     fs.writeFileSync(M3U8_PATH, m3u8Content, 'utf8');
     
-    // Verify files were written
-    const txtStats = fs.statSync(TXT_PATH);
-    const m3u8Stats = fs.statSync(M3U8_PATH);
+    // Verify
+    const txtExists = fs.existsSync(TXT_PATH);
+    const m3u8Exists = fs.existsSync(M3U8_PATH);
     
-    console.log(`✅ Update successful!`);
-    console.log(`   Files written: ${txtStats.size} bytes (txt), ${m3u8Stats.size} bytes (m3u8)`);
-    console.log(`   Check at: ${process.env.RAILWAY_PUBLIC_DOMAIN || 'your-domain'}/alternate.txt`);
-    
-    return true;
+    if (txtExists && m3u8Exists) {
+      const txtSize = fs.statSync(TXT_PATH).size;
+      const m3u8Size = fs.statSync(M3U8_PATH).size;
+      
+      console.log('🎉 UPDATE SUCCESSFUL!');
+      console.log(`   Files saved: ${txtSize} bytes (txt), ${m3u8Size} bytes (m3u8)`);
+      console.log(`   Access at: /alternate.txt`);
+      console.log(`   Next update in 1 minute`);
+      return true;
+    } else {
+      throw new Error('Files not created successfully');
+    }
     
   } catch (error) {
-    console.error(`❌ Update failed:`, error.message);
-    console.error(`Stack:`, error.stack);
+    console.error('❌ UPDATE FAILED:', error.message);
+    
+    // Create placeholder files if they don't exist
+    if (!fs.existsSync(TXT_PATH)) {
+      fs.writeFileSync(TXT_PATH, '#EXTM3U\n# Error: Update failed\n');
+    }
+    if (!fs.existsSync(M3U8_PATH)) {
+      fs.writeFileSync(M3U8_PATH, '#EXTM3U\n# Error: Update failed\n');
+    }
+    
     return false;
   }
 }
 
-// Run update if called directly
-if (require.main === module) {
-  updateStream()
-    .then(success => {
-      console.log(`Process exiting with code: ${success ? 0 : 1}`);
-      process.exit(success ? 0 : 1);
-    })
-    .catch(error => {
-      console.error('Unhandled error:', error);
-      process.exit(1);
-    });
-}
-
-module.exports = updateStream;
+// Run immediately
+updateStream().then(success => {
+  const exitCode = success ? 0 : 1;
+  console.log(`Exiting with code: ${exitCode}`);
+  process.exit(exitCode);
+}).catch(error => {
+  console.error('Unhandled error:', error);
+  process.exit(1);
+});
