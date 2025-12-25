@@ -1,33 +1,30 @@
 const fetch = require('node-fetch');
-const fs = require('fs-extra');
+const fs = require('fs');
 const path = require('path');
 
-// Configuration
 const SOURCE_URL = 'https://livecricketsl.cc.nf/proxy/fox.php';
-const TXT_FILE = path.join(__dirname, 'alternate.txt');
-const M3U8_FILE = path.join(__dirname, 'alternate.m3u8');
-const LOG_FILE = path.join(__dirname, 'update.log');
 
-async function log(message) {
+// IMPORTANT: Use absolute paths for Railway cron
+const TXT_PATH = path.join(process.cwd(), 'alternate.txt');
+const M3U8_PATH = path.join(process.cwd(), 'alternate.m3u8');
+
+async function updateStream() {
   const timestamp = new Date().toISOString();
-  const logMessage = `[${timestamp}] ${message}\n`;
-  console.log(logMessage.trim());
+  console.log(`[${timestamp}] Starting update from cron job...`);
+  console.log(`Current directory: ${process.cwd()}`);
+  console.log(`TXT path: ${TXT_PATH}`);
+  console.log(`M3U8 path: ${M3U8_PATH}`);
   
-  // Append to log file
-  await fs.appendFile(LOG_FILE, logMessage);
-}
-
-async function fetchStream() {
   try {
-    log('Fetching stream from source...');
-    
+    // Fetch from source
+    console.log('Fetching stream...');
     const response = await fetch(SOURCE_URL, {
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
         'Referer': 'https://livecricketsl.cc.nf/',
-        'Accept': 'application/x-mpegURL, application/vnd.apple.mpegurl, */*'
+        'Accept': 'application/x-mpegURL'
       },
-      timeout: 10000 // 10 seconds
+      timeout: 15000
     });
 
     if (!response.ok) {
@@ -35,89 +32,49 @@ async function fetchStream() {
     }
 
     const text = await response.text();
+    console.log(`Fetched ${text.length} characters`);
     
     if (!text.includes('#EXTM3U')) {
-      throw new Error('Invalid M3U8 content');
+      throw new Error('Invalid M3U8 content - no #EXTM3U tag found');
     }
 
-    return text;
+    // Create both files
+    const txtContent = `# Updated via Railway Cron: ${timestamp}\n${text}`;
+    const m3u8Content = `#EXTM3U\n# Updated: ${timestamp}\n${text}`;
+    
+    // Save files with absolute paths
+    console.log('Writing files...');
+    fs.writeFileSync(TXT_PATH, txtContent, 'utf8');
+    fs.writeFileSync(M3U8_PATH, m3u8Content, 'utf8');
+    
+    // Verify files were written
+    const txtStats = fs.statSync(TXT_PATH);
+    const m3u8Stats = fs.statSync(M3U8_PATH);
+    
+    console.log(`✅ Update successful!`);
+    console.log(`   Files written: ${txtStats.size} bytes (txt), ${m3u8Stats.size} bytes (m3u8)`);
+    console.log(`   Check at: ${process.env.RAILWAY_PUBLIC_DOMAIN || 'your-domain'}/alternate.txt`);
+    
+    return true;
+    
   } catch (error) {
-    log(`Fetch error: ${error.message}`);
-    throw error;
+    console.error(`❌ Update failed:`, error.message);
+    console.error(`Stack:`, error.stack);
+    return false;
   }
 }
 
-async function updateFiles() {
-  try {
-    log('Starting update process...');
-    
-    // Fetch fresh stream
-    const streamContent = await fetchStream();
-    
-    // Create timestamp
-    const timestamp = new Date().toISOString();
-    
-    // Create TXT version
-    const txtContent = `# Updated via Railway: ${timestamp}\n# Source: ${SOURCE_URL}\n\n${streamContent}`;
-    
-    // Create M3U8 version
-    const m3u8Content = `#EXTM3U\n# Updated: ${timestamp}\n${streamContent}`;
-    
-    // Save files
-    await fs.writeFile(TXT_FILE, txtContent, 'utf8');
-    await fs.writeFile(M3U8_FILE, m3u8Content, 'utf8');
-    
-    log(`✓ Update successful! ${streamContent.length} characters`);
-    log(`  Files saved: alternate.txt, alternate.m3u8`);
-    
-    return {
-      success: true,
-      timestamp,
-      length: streamContent.length
-    };
-    
-  } catch (error) {
-    log(`✗ Update failed: ${error.message}`);
-    
-    // Keep existing files if update fails
-    const txtExists = await fs.pathExists(TXT_FILE);
-    const m3u8Exists = await fs.pathExists(M3U8_FILE);
-    
-    if (!txtExists) {
-      await fs.writeFile(TXT_FILE, '#EXTM3U\n# Initializing...', 'utf8');
-    }
-    if (!m3u8Exists) {
-      await fs.writeFile(M3U8_FILE, '#EXTM3U\n# Initializing...', 'utf8');
-    }
-    
-    return {
-      success: false,
-      error: error.message
-    };
-  }
-}
-
-// Run update
-async function main() {
-  try {
-    const result = await updateFiles();
-    
-    if (result.success) {
-      console.log(JSON.stringify(result));
-      process.exit(0);
-    } else {
-      console.error(JSON.stringify(result));
-      process.exit(1);
-    }
-  } catch (error) {
-    console.error(JSON.stringify({ success: false, error: error.message }));
-    process.exit(1);
-  }
-}
-
-// If called directly
+// Run update if called directly
 if (require.main === module) {
-  main();
+  updateStream()
+    .then(success => {
+      console.log(`Process exiting with code: ${success ? 0 : 1}`);
+      process.exit(success ? 0 : 1);
+    })
+    .catch(error => {
+      console.error('Unhandled error:', error);
+      process.exit(1);
+    });
 }
 
-module.exports = { updateFiles };
+module.exports = updateStream;
