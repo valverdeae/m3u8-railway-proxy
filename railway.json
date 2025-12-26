@@ -6,11 +6,6 @@
   "deploy": {
     "numReplicas": 1,
     "restartPolicyType": "ON_FAILURE"
-  },
-  "crons": [
-    {
-      "command": "node update.js",
-      "schedule": "*/1 * * * *"
-    }
-  ]
+  }
+  // No cron needed - fetching fresh each time
 }
