@@ -1,58 +1,111 @@
 const express = require('express');
-const fs = require('fs');
-const path = require('path');
+const fetch = require('node-fetch');
 const app = express();
 
 const PORT = process.env.PORT || 3000;
+const SOURCE_URL = 'https://livecricketsl.cc.nf/proxy/fox.php';
 
-// CRITICAL: Read from same /tmp directory
-const TXT_PATH = '/tmp/alternate.txt';
-const M3U8_PATH = '/tmp/alternate.m3u8';
-
-// Create initial files in /tmp if they don't exist
-if (!fs.existsSync(TXT_PATH)) {
-  fs.writeFileSync(TXT_PATH, '#EXTM3U\n# Initializing...');
-  console.log('Created initial /tmp/alternate.txt');
+// Middleware to fetch fresh stream
+async function fetchFreshStream() {
+  try {
+    const response = await fetch(SOURCE_URL, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        'Referer': 'https://livecricketsl.cc.nf/',
+        'Accept': 'application/x-mpegURL'
+      },
+      timeout: 10000
+    });
+    
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    
+    const text = await response.text();
+    if (!text.includes('#EXTM3U')) throw new Error('Invalid M3U8');
+    
+    return text;
+  } catch (error) {
+    console.error('Fetch error:', error.message);
+    return '#EXTM3U\n# Error: ' + error.message;
+  }
 }
 
-app.get('/alternate.txt', (req, res) => {
+// Serve alternate.txt (always fresh)
+app.get('/alternate.txt', async (req, res) => {
   try {
-    const content = fs.readFileSync(TXT_PATH, 'utf8');
+    const stream = await fetchFreshStream();
+    const timestamp = new Date().toISOString();
+    const content = `# Updated: ${timestamp}\n${stream}`;
+    
     res.set({
       'Content-Type': 'text/plain',
-      'Cache-Control': 'no-cache'
+      'Cache-Control': 'no-cache, no-store, must-revalidate',
+      'Pragma': 'no-cache',
+      'Expires': '0'
     });
     res.send(content);
   } catch (error) {
-    res.send('#EXTM3U\n# Error reading file');
+    res.status(500).send('#EXTM3U\n# Server error');
   }
 });
 
-app.get('/alternate.m3u8', (req, res) => {
+// Serve alternate.m3u8 (always fresh)
+app.get('/alternate.m3u8', async (req, res) => {
   try {
-    const content = fs.readFileSync(M3U8_PATH, 'utf8');
+    const stream = await fetchFreshStream();
+    const timestamp = new Date().toISOString();
+    const content = `#EXTM3U\n# Updated: ${timestamp}\n${stream}`;
+    
     res.set({
       'Content-Type': 'application/vnd.apple.mpegurl',
-      'Cache-Control': 'no-cache'
+      'Cache-Control': 'no-cache, no-store, must-revalidate'
     });
     res.send(content);
   } catch (error) {
-    res.send('#EXTM3U\n# Error reading file');
+    res.status(500).send('#EXTM3U\n# Server error');
   }
 });
 
-app.get('/debug', (req, res) => {
-  const files = {
-    '/tmp/alternate.txt': fs.existsSync(TXT_PATH),
-    '/tmp/alternate.m3u8': fs.existsSync(M3U8_PATH),
-    './alternate.txt': fs.existsSync('./alternate.txt'),
-    currentDir: process.cwd(),
-    tmpDir: fs.readdirSync('/tmp')
-  };
-  res.json(files);
+// Status page
+app.get('/status', (req, res) => {
+  res.json({
+    status: 'running',
+    service: 'Live Stream Proxy',
+    source: SOURCE_URL,
+    endpoints: {
+      txt: '/alternate.txt',
+      m3u8: '/alternate.m3u8'
+    },
+    note: 'Stream is fetched fresh on every request'
+  });
 });
 
+// Test endpoint
+app.get('/test-fetch', async (req, res) => {
+  try {
+    const start = Date.now();
+    const stream = await fetchFreshStream();
+    const duration = Date.now() - start;
+    
+    res.json({
+      success: stream.includes('#EXTM3U'),
+      fetchTime: `${duration}ms`,
+      length: stream.length,
+      preview: stream.substring(0, 200) + '...'
+    });
+  } catch (error) {
+    res.json({ error: error.message });
+  }
+});
+
+// Health check
+app.get('/health', (req, res) => {
+  res.json({ status: 'ok', timestamp: new Date().toISOString() });
+});
+
+// Start server
 app.listen(PORT, () => {
-  console.log(`✅ Server running`);
-  console.log(`📁 Serving from /tmp directory`);
+  console.log(`✅ Server running on port ${PORT}`);
+  console.log(`📄 Fresh TXT: http://localhost:${PORT}/alternate.txt`);
+  console.log(`🎬 Fresh M3U8: http://localhost:${PORT}/alternate.m3u8`);
+  console.log(`📊 Status: http://localhost:${PORT}/status`);
 });
